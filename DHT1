@@ -1,0 +1,125 @@
+#include <WiFi.h>
+#include <SinricPro.h>
+#include <SinricProSwitch.h>
+#include <DHT.h>
+
+// ✅ Cấu hình WiFi
+const char* ssid = "realme 8";
+const char* password = "00001111";
+
+// ✅ Thông tin Sinric Pro
+#define APP_KEY     "8e10eb5d-2f08-4317-908b-322a540c6239"  
+#define APP_SECRET  "07f2aa77-e000-4d17-aed1-c6af2b2b8e37-51b7fd9f-232a-4fdc-83a8-833818b01bf5"
+#define DEVICE_ID_1 "67d13b264dee339ca79b6f80"  // Đèn 1
+#define DEVICE_ID_2 "67d13b566066f22be0656db5"  // Đèn 2
+#define SENSOR_ID   "DHT_SENSOR"  // ID giả lập cho cảm biến trên Sinric Pro
+
+// ✅ Định nghĩa chân Relay
+#define RELAY_1 33
+#define RELAY_2 32
+
+// ✅ Cảm biến DHT11
+#define DHTPIN 4  // Chân kết nối cảm biến
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// 📌 Kết nối WiFi
+void connectWiFi() {
+    WiFi.begin(ssid, password);
+    Serial.print("Đang kết nối WiFi");
+    int attempt = 0;
+    
+    while (WiFi.status() != WL_CONNECTED && attempt < 20) {  // Giới hạn 10 giây
+        delay(500);
+        Serial.print(".");
+        attempt++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\n✅ Kết nối WiFi thành công!");
+    } else {
+        Serial.println("\n❌ Không thể kết nối WiFi!");
+    }
+}
+
+// 📌 Đọc dữ liệu cảm biến & đưa ra lời khuyên
+String getRecommendation() {
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+
+    if (isnan(temperature) || isnan(humidity)) {
+        return "⚠️ Không đọc được dữ liệu từ cảm biến!";
+    }
+
+    String advice = "🌡 Nhiệt độ: " + String(temperature) + "°C - 💧 Độ ẩm: " + String(humidity) + "%\n";
+
+    if (temperature > 30) {
+        advice += "🔥 Trời quá nóng! Hãy bật quạt hoặc điều hòa.\n";
+    } else if (temperature < 18) {
+        advice += "❄️ Trời lạnh! Hãy bật sưởi.\n";
+    }
+
+    if (humidity < 40) {
+        advice += "💦 Độ ẩm thấp! Hãy bật máy phun sương.\n";
+    } else if (humidity > 70) {
+        advice += "☁️ Độ ẩm cao! Hãy mở cửa sổ để thông gió.\n";
+    }
+
+    return advice;
+}
+
+// 📌 Xử lý lệnh bật/tắt đèn từ Sinric Pro
+bool onPowerState1(const String &deviceId, bool &state) {
+    digitalWrite(RELAY_1, state ? HIGH : LOW);
+    Serial.printf("💡 Đèn 1 %s\n", state ? "BẬT" : "TẮT");
+
+    if (state) {  // Nếu đèn được bật, hiển thị khuyến nghị
+        String advice = getRecommendation();
+        Serial.println(advice);
+    }
+
+    return true;
+}
+
+bool onPowerState2(const String &deviceId, bool &state) {
+    digitalWrite(RELAY_2, state ? HIGH : LOW);
+    Serial.printf("💡 Đèn 2 %s\n", state ? "BẬT" : "TẮT");
+
+    if (state) {  // Nếu đèn được bật, hiển thị khuyến nghị
+        String advice = getRecommendation();
+        Serial.println(advice);
+    }
+
+    return true;
+}
+
+void setup() {
+    Serial.begin(115200);
+    dht.begin();
+
+    connectWiFi();
+
+    // ✅ Cấu hình chân Relay
+    pinMode(RELAY_1, OUTPUT);
+    pinMode(RELAY_2, OUTPUT);
+    digitalWrite(RELAY_1, LOW);
+    digitalWrite(RELAY_2, LOW);
+
+    // ✅ Cấu hình thiết bị trên Sinric Pro
+    SinricProSwitch &myLight1 = SinricPro[DEVICE_ID_1];
+    myLight1.onPowerState(onPowerState1);
+
+    SinricProSwitch &myLight2 = SinricPro[DEVICE_ID_2];
+    myLight2.onPowerState(onPowerState2);
+
+    SinricPro.begin(APP_KEY, APP_SECRET);
+}
+
+void loop() {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("🔄 WiFi bị mất kết nối! Đang thử kết nối lại...");
+        connectWiFi();
+    }
+    
+    SinricPro.handle();
+}
